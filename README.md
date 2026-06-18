@@ -6,6 +6,16 @@
 训练模型 → 打包上传 S3 → 构建推理镜像 → 推送 ECR → 创建端点 → 调用推理
 ```
 
+## Step 0: 设置环境变量
+
+```bash
+export REGION=us-east-1
+export ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+export IMAGE_NAME=xgboost-byos-inference
+export BUCKET=<your-bucket>
+export SAGEMAKER_ROLE_ARN=arn:aws:iam::${ACCOUNT}:role/<SageMakerExecutionRole>
+```
+
 ## Step 1: 训练模型
 
 ```bash
@@ -17,7 +27,8 @@ python3 train.py --output-dir ./model_output
 ```bash
 cd model_output
 tar -czvf model.tar.gz model.json
-aws s3 cp model.tar.gz s3://<your-bucket>/artifact/model.tar.gz
+aws s3 cp model.tar.gz s3://${BUCKET}/artifact/model.tar.gz
+cd ..
 ```
 
 > 模型文件必须位于 tar 包根目录。
@@ -26,16 +37,14 @@ aws s3 cp model.tar.gz s3://<your-bucket>/artifact/model.tar.gz
 
 ```bash
 chmod +x build_and_push.sh
-./build_and_push.sh <image-name> <region>
-# 例: ./build_and_push.sh xgboost-byos-inference us-east-1
+./build_and_push.sh ${IMAGE_NAME} ${REGION}
 ```
 
 ## Step 4: 部署 SageMaker 端点
 
 ```bash
-export IMAGE_URI=<account>.dkr.ecr.<region>.amazonaws.com/<image-name>:latest
-export SAGEMAKER_ROLE_ARN=arn:aws:iam::<account>:role/<SageMakerExecutionRole>
-export MODEL_DATA_URL=s3://<your-bucket>/artifact/model.tar.gz
+export IMAGE_URI=${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/${IMAGE_NAME}:latest
+export MODEL_DATA_URL=s3://${BUCKET}/artifact/model.tar.gz
 python3 deploy.py
 ```
 

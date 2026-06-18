@@ -6,10 +6,24 @@
 训练模型 → 打包上传 S3 → 构建推理镜像 → 推送 ECR → 创建端点 → 调用推理
 ```
 
+## 前置条件
+
+安装训练依赖：
+
+```bash
+pip install xgboost
+```
+
+SageMaker 执行角色需具备以下权限：
+
+- **S3**: 读写模型文件所在 bucket
+- **ECR**: `ecr:CreateRepository`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`, `ecr:PutImage`, `ecr:BatchCheckLayerAvailability`
+- **SageMaker**: `sagemaker:CreateModel`, `sagemaker:CreateEndpointConfig`, `sagemaker:CreateEndpoint`, `sagemaker:InvokeEndpoint`
+
 ## Step 0: 设置环境变量
 
 ```bash
-export REGION=us-east-1
+export AWS_REGION=us-east-1
 export ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 export IMAGE_NAME=xgboost-byos-inference
 export BUCKET=<your-bucket>
@@ -37,13 +51,13 @@ cd ..
 
 ```bash
 chmod +x build_and_push.sh
-./build_and_push.sh ${IMAGE_NAME} ${REGION}
+./build_and_push.sh ${IMAGE_NAME} ${AWS_REGION}
 ```
 
 ## Step 4: 部署 SageMaker 端点
 
 ```bash
-export IMAGE_URI=${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/${IMAGE_NAME}:latest
+export IMAGE_URI=${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_NAME}:latest
 export MODEL_DATA_URL=s3://${BUCKET}/artifact/model.tar.gz
 python3 deploy.py
 ```
@@ -70,7 +84,15 @@ response = runtime.invoke_endpoint(
 
 result = json.loads(response["Body"].read().decode("utf-8"))
 print(result)
-# {"predictions": [0.1155, 0.7127]}
+# {"predictions": [0.38, 0.81]}  (示例值, 因训练数据随机生成每次结果不同)
+```
+
+## Step 6: 清理资源
+
+端点会持续产生费用，不再使用时及时删除：
+
+```bash
+aws sagemaker delete-endpoint --endpoint-name xgboost-byos-endpoint --region ${AWS_REGION}
 ```
 
 ## 目录结构

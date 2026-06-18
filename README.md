@@ -50,18 +50,28 @@ python3 deploy.py
 
 ## Step 5: 调用端点
 
-```bash
-aws sagemaker-runtime invoke-endpoint \
-  --endpoint-name xgboost-byos-endpoint \
-  --content-type text/csv \
-  --accept application/json \
-  --body $'20.0,3,15,18.0,50.0,2,1,14,0,0.1,1,500,0,1,0.8' \
-  /dev/stdout
-```
+```python
+import json
+import boto3
 
-支持的输入格式:
-- `text/csv` — 无表头，逗号分隔
-- `application/json` — `{"instances": [[...], [...]]}`
+runtime = boto3.client("sagemaker-runtime", region_name="us-east-1")
+
+response = runtime.invoke_endpoint(
+    EndpointName="xgboost-byos-endpoint",
+    ContentType="application/json",
+    Accept="application/json",
+    Body=json.dumps({
+        "instances": [
+            [20.0, 3, 15, 18.0, 50.0, 2, 1, 14, 0, 0.1, 1, 500, 0, 1, 0.8],
+            [300.0, 1, 2, 25.0, 300.0, 7, 3, 3, 1, 0.8, 0, 10, 5, 8, 5.2],
+        ]
+    }),
+)
+
+result = json.loads(response["Body"].read().decode("utf-8"))
+print(result)
+# {"predictions": [0.1155, 0.7127]}
+```
 
 ## 目录结构
 

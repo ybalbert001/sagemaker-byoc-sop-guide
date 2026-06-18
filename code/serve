@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+# =========================================================================
+# serve - SageMaker 推理容器入口
+# =========================================================================
+# 当 SageMaker 执行 `docker run <image> serve` 时启动本脚本。
+# 启动架构:
+#       client ──> nginx (8080) ──> gunicorn (unix socket) ──> Flask app
+# nginx 负责对外暴露 8080 端口并做反向代理;
+# gunicorn 用多 worker 承载 Flask 推理应用。
+# =========================================================================
+import multiprocessing
+import os
+import signal
+import subprocess
+import sys
+
+# worker 数量: 默认按 CPU 核数, 可通过环境变量覆盖
+cpu_count = multiprocessing.cpu_count()
+model_server_timeout = int(os.environ.get("MODEL_SERVER_TIMEOUT", 60))
+model_server_workers = int(os.environ.get("MODEL_SERVER_WORKERS", cpu_count))
+
+
+def sigterm_handler(nginx_pid, gunicorn_pid):
+    """收到 SIGTERM 时优雅关闭子进程。"""
+    try:
+        os.kill(nginx_pid, signal.SIGQUIT)
+    except OSError:
+        pass
+    try:
+        os.kill(gunicorn_pid, signal.SIGTERM)
+    except OSError:
+        pass
+    sys.exit(0)
+
+
+def start_server():
+    print(f"Starting the inference server with {model_server_workers} workers.", flush=True)
+
+    # 将 nginx 日志重定向到容器 stdout/stderr -> CloudWatch
+    subprocess.check_call(["ln", "-sf", "/dev/stdout", "/var/log/nginx/access.log"])
+    subprocess.check_call(["ln", "-sf", "/dev/stderr", "/var/log/nginx/error.log"])
+
+    nginx = subprocess.Popen(["nginx", "-c", "/opt/program/nginx.conf"])
+    gunicorn = subprocess.Popen(
+        [
+            "gunicorn",
+            "--timeout", str(model_server_timeout),
+            "-k", "sync",
+            "-b", "unix:/tmp/gunicorn.sock",
+            "-w", str(model_server_workers),
+            "wsgi:app",
+        ]
+    )
+
+    signal.signal(signal.SIGTERM, lambda a, b: sigterm_handler(nginx.pid, gunicorn.pid))
+
+    # 任一子进程退出则整体退出, 让 SageMaker 感知容器不健康
+    pids = {nginx.pid, gunicorn.pid}
+    while True:
+        pid, _ = os.wait()
+        if pid in pids:
+            break
+
+    sigterm_handler(nginx.pid, gunicorn.pid)
+    print("Inference server exiting", flush=True)
+
+
+if __name__ == "__main__":
+    start_server()
